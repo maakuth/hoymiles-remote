@@ -49,15 +49,20 @@ class HoymilesRemoteApp:
     def on_mqtt_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
             logger.info(f"Connected to MQTT broker with prefix: {self.topic_prefix}")
-            result, mid = client.subscribe(self.command_topic)
-            logger.info(f"Subscription request sent for {self.command_topic} (mid: {mid})")
+            # Subscribe to the specific command topic AND a catch-all for the prefix
+            client.subscribe(self.command_topic)
+            client.subscribe(f"{self.topic_prefix}/#")
+            logger.info(f"Subscribed to {self.command_topic} and {self.topic_prefix}/#")
             self.publish_discovery()
             client.publish(self.availability_topic, "online", retain=True)
         else:
             logger.error(f"Failed to connect to MQTT broker, return code {rc}")
 
     def on_mqtt_message(self, client, userdata, msg):
-        logger.info(f"MQTT Message Received -> Topic: {msg.topic}, Payload: {msg.payload}")
+        logger.info(f"DEBUG: Received MQTT message on topic '{msg.topic}' with payload: {msg.payload}")
+        if msg.topic != self.command_topic:
+            return
+
         try:
             payload = msg.payload.decode()
             watts = int(float(payload))
@@ -90,18 +95,22 @@ class HoymilesRemoteApp:
                 "manufacturer": "Gemini CLI"
             }
         }
+        logger.info(f"Sending Discovery Payload to {discovery_topic}: {json.dumps(payload)}")
         self.mqtt_client.publish(discovery_topic, json.dumps(payload), retain=True)
-        logger.info(f"Published HA discovery to {discovery_topic}")
 
     async def process_commands(self):
+        logger.info("Command processor started and waiting for commands...")
+        last_heartbeat = 0
         while True:
-            watts = await self.command_queue.get()
             try:
+                # Add a timeout to the queue get to allow for a heartbeat
+                watts = await asyncio.wait_for(self.command_queue.get(), timeout=30.0)
                 await self.handle_power_command(watts)
-            except Exception as e:
-                logger.error(f"Error processing command {watts}W: {e}")
-            finally:
                 self.command_queue.task_done()
+            except asyncio.TimeoutError:
+                logger.info("Heartbeat: App is alive and waiting for MQTT messages...")
+            except Exception as e:
+                logger.error(f"Error in command loop: {e}")
 
     async def handle_power_command(self, watts):
         max_p = self.battery_config['max_power']
