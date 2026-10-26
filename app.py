@@ -9,6 +9,8 @@ from hoymiles_wifi.hoymiles import BMSWorkingMode
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("hoymiles_remote")
+# Enable debug logging for the library to see the actual packets
+logging.getLogger("hoymiles_wifi").setLevel(logging.DEBUG)
 
 class HoymilesRemoteApp:
     def __init__(self, config_path):
@@ -49,7 +51,6 @@ class HoymilesRemoteApp:
     def on_mqtt_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
             logger.info(f"Connected to MQTT broker with prefix: {self.topic_prefix}")
-            # Subscribe to the specific command topic AND a catch-all for the prefix
             client.subscribe(self.command_topic)
             client.subscribe(f"{self.topic_prefix}/#")
             logger.info(f"Subscribed to {self.command_topic} and {self.topic_prefix}/#")
@@ -74,7 +75,6 @@ class HoymilesRemoteApp:
             logger.warning(f"Error handling message: {e}")
 
     def publish_discovery(self):
-        # Home Assistant MQTT Discovery for Number entity
         discovery_topic = f"homeassistant/number/{self.device_id}/battery_power/config"
         max_p = self.battery_config['max_power']
         
@@ -96,14 +96,12 @@ class HoymilesRemoteApp:
         }
         logger.info(f"Sending Discovery Payload to {discovery_topic}")
         self.mqtt_client.publish(discovery_topic, json.dumps(payload), retain=True)
-        # Publish initial state
         self.mqtt_client.publish(self.state_topic, "0", retain=True)
 
     async def process_commands(self):
         logger.info("Command processor started and waiting for commands...")
         while True:
             try:
-                # Add a timeout to the queue get to allow for a heartbeat
                 watts = await asyncio.wait_for(self.command_queue.get(), timeout=30.0)
                 await self.handle_power_command(watts)
                 self.command_queue.task_done()
@@ -127,7 +125,6 @@ class HoymilesRemoteApp:
             percentage = 0
             logger.info(f"Setting mode to SELF_USE (0W)")
 
-        # Use serials from config directly (bypassing unreliable dynamic fetch)
         dtu_sn = int(self.dtu_config.get('serial', 0))
         inv_sn = int(self.dtu_config.get('inverter_serial', 0))
         
@@ -135,16 +132,20 @@ class HoymilesRemoteApp:
             logger.error("DTU serial or Inverter serial missing in config!")
             return
 
-        # Configure DTU
         self.dtu.timeout = 10 
         
         try:
-            logger.info(f"Sending command to Inverter {inv_sn} via Gateway {dtu_sn}...")
+            # First, try to "ping" the inverter to wake it up / verify connection
+            # We reset sequence so it's 1 for this command (matching CLI)
+            self.dtu.sequence = 0
+            logger.info("Pinging inverter (get gateway info)...")
+            await self.dtu.async_get_gateway_info()
             
-            # Ensure sequence is initialized/incremented
-            if not hasattr(self.dtu, 'sequence'):
-                self.dtu.sequence = 0
-            self.dtu.sequence = (self.dtu.sequence + 1) & 0xFFFF
+            await asyncio.sleep(1) 
+            
+            logger.info(f"Sending command to Inverter {inv_sn} via Gateway {dtu_sn}...")
+            # Reset sequence again so it's 1 for the battery command too
+            self.dtu.sequence = 0
             
             result = await self.dtu.async_set_energy_storage_working_mode(
                 dtu_serial_number=dtu_sn,
