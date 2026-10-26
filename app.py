@@ -1,0 +1,137 @@
+import asyncio
+import json
+import logging
+import yaml
+import paho.mqtt.client as mqtt
+from hoymiles_wifi.dtu import DTU
+from hoymiles_wifi.hoymiles import BMSWorkingMode
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("hoymiles_remote")
+
+class HoymilesRemoteApp:
+    def __init__(self, config_path):
+        with open(config_path, 'r') as f:
+            self.config = yaml.safe_load(f)
+        
+        self.mqtt_config = self.config['mqtt']
+        self.dtu_config = self.config['dtu']
+        self.battery_config = self.config['battery']
+        
+        self.topic_prefix = self.mqtt_config.get('topic_prefix', 'hoymiles')
+        self.device_id = self.mqtt_config.get('device_id', 'hoymiles_remote')
+        
+        self.command_topic = f"{self.topic_prefix}/battery/set_power"
+        self.state_topic = f"{self.topic_prefix}/battery/power_state"
+        self.availability_topic = f"{self.topic_prefix}/status"
+        
+        self.mqtt_client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2)
+        if self.mqtt_config.get('user'):
+            self.mqtt_client.username_pw_set(self.mqtt_config['user'], self.mqtt_config['password'])
+        
+        self.mqtt_client.on_connect = self.on_mqtt_connect
+        self.mqtt_client.on_message = self.on_mqtt_message
+        
+        self.dtu = DTU(self.dtu_config['host'])
+        self.loop = asyncio.get_event_loop()
+        self.command_queue = asyncio.Queue()
+
+    def on_mqtt_connect(self, client, userdata, flags, rc, properties=None):
+        if rc == 0:
+            logger.info("Connected to MQTT broker")
+            client.subscribe(self.command_topic)
+            self.publish_discovery()
+            client.publish(self.availability_topic, "online", retain=True)
+        else:
+            logger.error(f"Failed to connect to MQTT broker, return code {rc}")
+
+    def on_mqtt_message(self, client, userdata, msg):
+        try:
+            payload = msg.payload.decode()
+            logger.info(f"Received MQTT message on {msg.topic}: {payload}")
+            watts = int(float(payload))
+            self.loop.call_soon_threadsafe(self.command_queue.put_nowait, watts)
+        except ValueError:
+            logger.warning(f"Invalid payload received: {msg.payload}")
+
+    def publish_discovery(self):
+        # Home Assistant MQTT Discovery for Number entity
+        discovery_topic = f"homeassistant/number/{self.device_id}/battery_power/config"
+        max_p = self.battery_config['max_power']
+        
+        payload = {
+            "name": "Hoymiles Battery Power",
+            "unique_id": f"{self.device_id}_battery_power",
+            "cmd_t": self.command_topic,
+            "stat_t": self.state_topic,
+            "avty_t": self.availability_topic,
+            "unit_of_meas": "W",
+            "min": -max_p,
+            "max": max_p,
+            "step": 1,
+            "device": {
+                "identifiers": [self.device_id],
+                "name": "Hoymiles Remote Control",
+                "model": "BESS Controller",
+                "manufacturer": "Gemini CLI"
+            }
+        }
+        self.mqtt_client.publish(discovery_topic, json.dumps(payload), retain=True)
+        logger.info(f"Published HA discovery to {discovery_topic}")
+
+    async def process_commands(self):
+        while True:
+            watts = await self.command_queue.get()
+            try:
+                await self.handle_power_command(watts)
+            except Exception as e:
+                logger.error(f"Error processing command {watts}W: {e}")
+            finally:
+                self.command_queue.task_done()
+
+    async def handle_power_command(self, watts):
+        max_p = self.battery_config['max_power']
+        percentage = min(100, max(0, int(abs(watts) / max_p * 100)))
+        
+        if watts > 0:
+            mode = BMSWorkingMode.FORCED_DISCHARGE
+            logger.info(f"Setting mode to FORCED_DISCHARGE at {percentage}% ({watts}W)")
+        elif watts < 0:
+            mode = BMSWorkingMode.FORCED_CHARGING
+            logger.info(f"Setting mode to FORCED_CHARGING at {percentage}% ({abs(watts)}W)")
+        else:
+            mode = BMSWorkingMode.SELF_USE
+            percentage = 0
+            logger.info(f"Setting mode to SELF_USE (0W)")
+
+        result = await self.dtu.async_set_energy_storage_working_mode(
+            dtu_serial_number=int(self.dtu_config['serial']),
+            inverter_serial_number=int(self.dtu_config['inverter_serial']),
+            bms_working_mode=mode,
+            max_power=percentage
+        )
+        
+        if result:
+            logger.info(f"DTU Command successful: {result}")
+            self.mqtt_client.publish(self.state_topic, str(watts), retain=True)
+        else:
+            logger.error("DTU Command failed (no response)")
+
+    async def run(self):
+        self.mqtt_client.connect(self.mqtt_config['host'], self.mqtt_config['port'], 60)
+        self.mqtt_client.loop_start()
+        
+        try:
+            await self.process_commands()
+        finally:
+            self.mqtt_client.publish(self.availability_topic, "offline", retain=True)
+            self.mqtt_client.loop_stop()
+            self.mqtt_client.disconnect()
+
+if __name__ == "__main__":
+    app = HoymilesRemoteApp("config.yaml")
+    try:
+        asyncio.run(app.run())
+    except KeyboardInterrupt:
+        pass

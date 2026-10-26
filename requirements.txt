@@ -1,1 +1,3 @@
 hoymiles-wifi
+paho-mqtt
+pyyaml
