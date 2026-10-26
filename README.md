@@ -59,7 +59,7 @@ with the existing signed-power-only interface.
 | **mqtt** | `host` | MQTT Broker IP/hostname. |
 | | `topic_prefix` | Prefix for MQTT topics (default: `hoymiles`). |
 | **dtu** | `host` | IP address of the Hoymiles DTU. |
-| | `serial` | Serial number of the DTU. |
+| | `serial` | Serial number of the DTU. TODO: Check if this is used, likely it's not |
 | | `inverter_serial`| Serial number of the Hybrid Inverter. |
 | **battery**| `max_power` | Maximum power in Watts for percentage calculation. |
 
