@@ -34,13 +34,14 @@ class HoymilesRemoteApp:
         self.mqtt_client.on_message = self.on_mqtt_message
         
         self.dtu = DTU(self.dtu_config['host'])
-        self.loop = asyncio.get_event_loop()
+        self.loop = None
         self.command_queue = asyncio.Queue()
 
     def on_mqtt_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
-            logger.info("Connected to MQTT broker")
+            logger.info(f"Connected to MQTT broker with prefix: {self.topic_prefix}")
             client.subscribe(self.command_topic)
+            logger.info(f"Subscribed to command topic: {self.command_topic}")
             self.publish_discovery()
             client.publish(self.availability_topic, "online", retain=True)
         else:
@@ -51,7 +52,10 @@ class HoymilesRemoteApp:
             payload = msg.payload.decode()
             logger.info(f"Received MQTT message on {msg.topic}: {payload}")
             watts = int(float(payload))
-            self.loop.call_soon_threadsafe(self.command_queue.put_nowait, watts)
+            if self.loop:
+                self.loop.call_soon_threadsafe(self.command_queue.put_nowait, watts)
+            else:
+                logger.error("Event loop not initialized, cannot process command")
         except ValueError:
             logger.warning(f"Invalid payload received: {msg.payload}")
 
@@ -119,6 +123,7 @@ class HoymilesRemoteApp:
             logger.error("DTU Command failed (no response)")
 
     async def run(self):
+        self.loop = asyncio.get_running_loop()
         self.mqtt_client.connect(self.mqtt_config['host'], self.mqtt_config['port'], 60)
         self.mqtt_client.loop_start()
         
