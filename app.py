@@ -120,9 +120,9 @@ class HoymilesRemoteApp:
             mode = BMSWorkingMode.FORCED_CHARGING
             logger.info(f"Setting mode to FORCED_CHARGING at {percentage}% ({abs(watts)}W)")
         else:
-            mode = BMSWorkingMode.SELF_USE
+            mode = BMSWorkingMode.FORCED_DISCHARGE
             percentage = 0
-            logger.info(f"Setting mode to SELF_USE (0W)")
+            logger.info(f"Setting mode to FORCED_DISCHARGE (0W)")
 
         # Use host and inverter serial from config
         dtu_host = str(self.dtu_config.get('host', '')).strip()
