@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 import yaml
 import paho.mqtt.client as mqtt
 from hoymiles_wifi.dtu import DTU
@@ -42,10 +43,12 @@ class HoymilesRemoteApp:
         self.mqtt_client.on_log = self.on_mqtt_log
         self.mqtt_client.on_disconnect = self.on_mqtt_disconnect
         self.mqtt_client.on_publish = self.on_publish
+        self.mqtt_client.reconnect_delay_set(min_delay=1, max_delay=30)
         
         self.dtu = DTU(self.dtu_config['host'])
         self.loop = None
         self.command_queue = asyncio.Queue()
+        self._mqtt_disconnected_at = None
 
     def on_mqtt_log(self, client, userdata, level, buf):
         if level == mqtt.LogLevel.LOG_ERR:
@@ -59,6 +62,7 @@ class HoymilesRemoteApp:
 
     def on_mqtt_disconnect(self, client, userdata, flags, rc, properties=None):
         logger.warning(f"Disconnected from MQTT broker with rc: {rc}")
+        self._mqtt_disconnected_at = time.monotonic()
 
     def on_mqtt_subscribe(self, client, userdata, mid, reason_codes, properties=None):
         logger.info(f"Subscribed successfully (mid: {mid}, reason_codes: {reason_codes})")
@@ -80,6 +84,7 @@ class HoymilesRemoteApp:
 
             # Online status
             client.publish(self.availability_topic, "online", retain=True)
+            self._mqtt_disconnected_at = None
         else:
             logger.error(f"Failed to connect, rc {rc}")
 
@@ -142,7 +147,11 @@ class HoymilesRemoteApp:
                 await self.handle_power_command(watts)
                 self.command_queue.task_done()
             except asyncio.TimeoutError:
-                logger.info("Heartbeat: App is alive and waiting for MQTT messages...")
+                if not self.mqtt_client.is_connected():
+                    elapsed = time.monotonic() - self._mqtt_disconnected_at if self._mqtt_disconnected_at else 0
+                    logger.warning(f"MQTT disconnected ({elapsed:.0f}s) - waiting for reconnect...")
+                else:
+                    logger.info("Heartbeat: App is alive and waiting for MQTT messages...")
             except Exception as e:
                 logger.error(f"Error in command loop: {e}")
 
