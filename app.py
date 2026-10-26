@@ -101,7 +101,6 @@ class HoymilesRemoteApp:
 
     async def process_commands(self):
         logger.info("Command processor started and waiting for commands...")
-        last_heartbeat = 0
         while True:
             try:
                 # Add a timeout to the queue get to allow for a heartbeat
@@ -128,32 +127,28 @@ class HoymilesRemoteApp:
             percentage = 0
             logger.info(f"Setting mode to SELF_USE (0W)")
 
+        # Use serials from config directly (bypassing unreliable dynamic fetch)
+        dtu_sn = int(self.dtu_config.get('serial', 0))
+        inv_sn = int(self.dtu_config.get('inverter_serial', 0))
+        
+        if not dtu_sn or not inv_sn:
+            logger.error("DTU serial or Inverter serial missing in config!")
+            return
+
         # Configure DTU
         self.dtu.timeout = 10 
         
-        dtu_sn = None
-        # Try to get gateway info
         try:
-            logger.info("Fetching gateway info...")
-            gateway_info = await self.dtu.async_get_gateway_info()
-            if gateway_info:
-                dtu_sn = gateway_info.serial_number
-                logger.info(f"Dynamic gateway SN found: {dtu_sn}")
-        except Exception as e:
-            logger.debug(f"Gateway fetch failed: {e}")
-
-        # Fallback to config
-        if dtu_sn is None:
-            dtu_sn = int(self.dtu_config.get('serial', 0))
-            logger.warning(f"Using fallback/config gateway SN: {dtu_sn}")
-
-        try:
-            # Increment sequence to mirror CLI behavior
+            logger.info(f"Sending command to Inverter {inv_sn} via Gateway {dtu_sn}...")
+            
+            # Ensure sequence is initialized/incremented
+            if not hasattr(self.dtu, 'sequence'):
+                self.dtu.sequence = 0
             self.dtu.sequence = (self.dtu.sequence + 1) & 0xFFFF
             
             result = await self.dtu.async_set_energy_storage_working_mode(
                 dtu_serial_number=dtu_sn,
-                inverter_serial_number=int(self.dtu_config['inverter_serial']),
+                inverter_serial_number=inv_sn,
                 bms_working_mode=mode,
                 rev_soc=self.battery_config.get('rev_soc', 10),
                 max_power=percentage,
