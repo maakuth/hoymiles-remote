@@ -36,7 +36,6 @@ battery:
             await self.app.handle_power_command(1000)
             mock_set_mode.assert_called_with(
                 unittest.mock.ANY,
-                dtu_serial_number=123,
                 inverter_serial_number=456,
                 bms_working_mode=BMSWorkingMode.FORCED_DISCHARGE,
                 max_power=50,
@@ -52,7 +51,6 @@ battery:
             await self.app.handle_power_command(-500)
             mock_set_mode.assert_called_with(
                 unittest.mock.ANY,
-                dtu_serial_number=123,
                 inverter_serial_number=456,
                 bms_working_mode=BMSWorkingMode.FORCED_CHARGING,
                 max_power=25,
@@ -68,7 +66,6 @@ battery:
             await self.app.handle_power_command(0)
             mock_set_mode.assert_called_with(
                 unittest.mock.ANY,
-                dtu_serial_number=123,
                 inverter_serial_number=456,
                 bms_working_mode=BMSWorkingMode.FORCED_DISCHARGE,
                 max_power=0,

@@ -160,7 +160,6 @@ class HoymilesRemoteApp:
         # Use host and inverter serial from config
         dtu_host = str(self.dtu_config.get('host', '')).strip()
         inv_sn = int(self.dtu_config.get('inverter_serial', 0))
-        dtu_sn = int(self.dtu_config.get('serial', 0))
         
         if not dtu_host or not inv_sn:
             logger.error("DTU host or Inverter serial missing in config!")
@@ -182,7 +181,6 @@ class HoymilesRemoteApp:
             result = await set_mode_cli(
                 dtu,
                 bms_working_mode=mode,
-                dtu_serial_number=dtu_sn,
                 inverter_serial_number=inv_sn,
                 interactive_mode=False,
                 rev_soc=self.battery_config.get('rev_soc', 10),
