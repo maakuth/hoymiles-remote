@@ -9,8 +9,7 @@ from hoymiles_wifi.hoymiles import BMSWorkingMode
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("hoymiles_remote")
-# Enable debug logging for the library to see the actual packets
-logging.getLogger("hoymiles_wifi").setLevel(logging.DEBUG)
+# logging.getLogger("hoymiles_wifi").setLevel(logging.DEBUG)
 
 class HoymilesRemoteApp:
     def __init__(self, config_path):
