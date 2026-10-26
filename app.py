@@ -69,18 +69,14 @@ class HoymilesRemoteApp:
     def on_mqtt_connect(self, client, userdata, flags, rc, properties=None):
         logger.info(f"MQTT connected with rc: {rc}")
         if rc == 0:
-            logger.info("Subscribing to everything (#) for diagnostics...")
-            client.subscribe("#")
-            
+            logger.info(f"Subscribing to command topic: {self.command_topic}")
+            client.subscribe(self.command_topic, qos=1)
+
             # Publish discovery first
             self.publish_discovery()
-            
+
             # Online status
             client.publish(self.availability_topic, "online", retain=True)
-            
-            # SELF-TEST: Delayed slightly to ensure subscription is active
-            if self.loop:
-                self.loop.call_later(2, lambda: client.publish(self.command_topic, "888"))
         else:
             logger.error(f"Failed to connect, rc {rc}")
 
@@ -123,7 +119,6 @@ class HoymilesRemoteApp:
             "min": -max_p,
             "max": max_p,
             "step": 1,
-            "optimistic": True,
             "device": {
                 "identifiers": [f"{self.device_id}_hw"],
                 "name": "Hoymiles Remote Bridge",
@@ -194,14 +189,17 @@ class HoymilesRemoteApp:
                 max_power=percentage,
                 peak_soc=self.battery_config.get('peak_soc', 100)
             )
-            
+
             if result:
                 logger.info("Inverter Command successful (via CLI logic)")
                 self.mqtt_client.publish(self.state_topic, str(watts), retain=True)
             else:
                 logger.error("Inverter Command failed (CLI logic returned None)")
+                # Publish 0 so HA state does not get stuck at the commanded value
+                self.mqtt_client.publish(self.state_topic, "0", retain=True)
         except Exception as e:
             logger.error(f"Exception during inverter command: {e}")
+            self.mqtt_client.publish(self.state_topic, "0", retain=True)
 
     async def run(self):
         self.loop = asyncio.get_running_loop()
