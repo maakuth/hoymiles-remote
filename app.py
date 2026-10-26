@@ -181,7 +181,8 @@ class HoymilesRemoteApp:
             except asyncio.TimeoutError:
                 if not self.mqtt_client.is_connected():
                     elapsed = time.monotonic() - self._mqtt_disconnected_at if self._mqtt_disconnected_at else 0
-                    logger.warning(f"MQTT disconnected ({elapsed:.0f}s) - waiting for reconnect...")
+                    logger.warning(f"MQTT disconnected ({elapsed:.0f}s) - forcing reconnect...")
+                    self._force_reconnect()
                 else:
                     restarted = self._check_mqtt_thread()
                     if restarted:
