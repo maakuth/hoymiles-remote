@@ -125,42 +125,42 @@ class HoymilesRemoteApp:
             percentage = 0
             logger.info(f"Setting mode to SELF_USE (0W)")
 
-        dtu_sn = int(self.dtu_config.get('serial', 0))
+        # Use host and inverter serial from config
+        dtu_host = str(self.dtu_config.get('host', '')).strip()
         inv_sn = int(self.dtu_config.get('inverter_serial', 0))
         
-        if not dtu_sn or not inv_sn:
-            logger.error("DTU serial or Inverter serial missing in config!")
+        if not dtu_host or not inv_sn:
+            logger.error("DTU host or Inverter serial missing in config!")
             return
 
-        self.dtu.timeout = 10 
+        # Import the same function the CLI uses
+        try:
+            from hoymiles_wifi.__main__ import async_set_energy_storage_working_mode as set_mode_cli
+        except ImportError:
+            logger.error("Could not import async_set_energy_storage_working_mode from hoymiles_wifi.__main__")
+            return
+
+        # Create a fresh DTU instance like the CLI does for every command
+        logger.info(f"Connecting to DTU at {dtu_host}...")
+        dtu = DTU(dtu_host, timeout=15)
         
         try:
-            # First, try to "ping" the inverter to wake it up / verify connection
-            # We reset sequence so it's 1 for this command (matching CLI)
-            self.dtu.sequence = 0
-            logger.info("Pinging inverter (get gateway info)...")
-            await self.dtu.async_get_gateway_info()
-            
-            await asyncio.sleep(1) 
-            
-            logger.info(f"Sending command to Inverter {inv_sn} via Gateway {dtu_sn}...")
-            # Reset sequence again so it's 1 for the battery command too
-            self.dtu.sequence = 0
-            
-            result = await self.dtu.async_set_energy_storage_working_mode(
-                dtu_serial_number=dtu_sn,
-                inverter_serial_number=inv_sn,
+            # This library function handles the gateway info and registry fetch internally
+            result = await set_mode_cli(
+                dtu,
                 bms_working_mode=mode,
+                inverter_serial_number=inv_sn,
+                interactive_mode=False,
                 rev_soc=self.battery_config.get('rev_soc', 10),
                 max_power=percentage,
                 peak_soc=self.battery_config.get('peak_soc', 100)
             )
             
             if result:
-                logger.info("Inverter Command successful")
+                logger.info("Inverter Command successful (via CLI logic)")
                 self.mqtt_client.publish(self.state_topic, str(watts), retain=True)
             else:
-                logger.error("Inverter Command failed (no response)")
+                logger.error("Inverter Command failed (CLI logic returned None)")
         except Exception as e:
             logger.error(f"Exception during inverter command: {e}")
 
