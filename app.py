@@ -128,16 +128,29 @@ class HoymilesRemoteApp:
             percentage = 0
             logger.info(f"Setting mode to SELF_USE (0W)")
 
-        try:
-            # Fetch gateway info dynamically just like the CLI does
-            gateway_info = await self.dtu.async_get_gateway_info()
-            if gateway_info is None:
-                logger.error("Failed to get gateway info from inverter")
-                return
-            
-            dtu_sn = gateway_info.serial_number
-            logger.info(f"Using gateway serial: {dtu_sn}")
+        # Configure DTU with a longer timeout
+        self.dtu.timeout = 30 
+        
+        dtu_sn = None
+        # Try to get gateway info with retries
+        for attempt in range(3):
+            try:
+                logger.info(f"Fetching gateway info (attempt {attempt+1}/3)...")
+                gateway_info = await self.dtu.async_get_gateway_info()
+                if gateway_info:
+                    dtu_sn = gateway_info.serial_number
+                    logger.info(f"Dynamic gateway SN found: {dtu_sn}")
+                    break
+            except Exception as e:
+                logger.debug(f"Gateway fetch attempt {attempt+1} failed: {e}")
+            await asyncio.sleep(1)
 
+        # Fallback to config if dynamic fetch failed
+        if dtu_sn is None:
+            dtu_sn = int(self.dtu_config.get('serial', 0))
+            logger.warning(f"Failed to fetch gateway info, falling back to config SN: {dtu_sn}")
+
+        try:
             result = await self.dtu.async_set_energy_storage_working_mode(
                 dtu_serial_number=dtu_sn,
                 inverter_serial_number=int(self.dtu_config['inverter_serial']),
