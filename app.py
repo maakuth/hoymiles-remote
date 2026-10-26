@@ -128,38 +128,32 @@ class HoymilesRemoteApp:
             percentage = 0
             logger.info(f"Setting mode to SELF_USE (0W)")
 
-        # Use the more direct send_command approach which matches the CLI behavior for HYT
-        from hoymiles_wifi.hoymiles import (
-            ActionConfigInverterBatteryModeResDTO,
-            RealResDTO
-        )
-        from hoymiles_wifi.const import CMD_ES_USER_SET_RES_DTO
-        
-        # Prepare the nested config message
-        msg_config = ActionConfigInverterBatteryModeResDTO()
-        msg_config.lock_password = "p"
-        msg_config.lock_command = 0
-        msg_config.bms_working_mode = mode
-        msg_config.rev_soc = self.battery_config.get('rev_soc', 10)
-        msg_config.max_power = percentage
-        msg_config.peak_soc = self.battery_config.get('peak_soc', 100)
-        
-        # Prepare the outer message
-        msg = RealResDTO()
-        msg.ymd_hms = "2024-01-01 00:00:00" # Placeholder, library usually handles or ignores
-        msg.cp_dtu_sn = 0 # CLI sets this to 0 for HYT/direct
-        msg.cp_inv_sn = int(self.dtu_config['inverter_serial'])
-        msg.offset = 0
-        msg.time = 0
-        msg.action_config_inv_bat_mode.CopyFrom(msg_config)
-        
-        result = await self.dtu.async_send_command(CMD_ES_USER_SET_RES_DTO, msg)
-        
-        if result:
-            logger.info(f"Command accepted by inverter: {result}")
-            self.mqtt_client.publish(self.state_topic, str(watts), retain=True)
-        else:
-            logger.error("Inverter Command failed (no response)")
+        try:
+            # Fetch gateway info dynamically just like the CLI does
+            gateway_info = await self.dtu.async_get_gateway_info()
+            if gateway_info is None:
+                logger.error("Failed to get gateway info from inverter")
+                return
+            
+            dtu_sn = gateway_info.serial_number
+            logger.info(f"Using gateway serial: {dtu_sn}")
+
+            result = await self.dtu.async_set_energy_storage_working_mode(
+                dtu_serial_number=dtu_sn,
+                inverter_serial_number=int(self.dtu_config['inverter_serial']),
+                bms_working_mode=mode,
+                rev_soc=self.battery_config.get('rev_soc', 10),
+                max_power=percentage,
+                peak_soc=self.battery_config.get('peak_soc', 100)
+            )
+            
+            if result:
+                logger.info(f"Inverter Command successful")
+                self.mqtt_client.publish(self.state_topic, str(watts), retain=True)
+            else:
+                logger.error("Inverter Command failed (no response)")
+        except Exception as e:
+            logger.error(f"Exception during inverter command: {e}")
 
     async def run(self):
         self.loop = asyncio.get_running_loop()
