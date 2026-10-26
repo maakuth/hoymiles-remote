@@ -32,32 +32,41 @@ class HoymilesRemoteApp:
         
         self.mqtt_client.on_connect = self.on_mqtt_connect
         self.mqtt_client.on_message = self.on_mqtt_message
+        self.mqtt_client.on_subscribe = self.on_mqtt_subscribe
+        self.mqtt_client.on_log = self.on_mqtt_log
         
         self.dtu = DTU(self.dtu_config['host'])
         self.loop = None
         self.command_queue = asyncio.Queue()
 
+    def on_mqtt_log(self, client, userdata, level, buf):
+        if level <= mqtt.LogLevel.LOG_WARNING:
+            logger.debug(f"MQTT Log: {buf}")
+
+    def on_mqtt_subscribe(self, client, userdata, mid, reason_codes, properties=None):
+        logger.info(f"Subscribed successfully (mid: {mid})")
+
     def on_mqtt_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
             logger.info(f"Connected to MQTT broker with prefix: {self.topic_prefix}")
-            client.subscribe(self.command_topic)
-            logger.info(f"Subscribed to command topic: {self.command_topic}")
+            result, mid = client.subscribe(self.command_topic)
+            logger.info(f"Subscription request sent for {self.command_topic} (mid: {mid})")
             self.publish_discovery()
             client.publish(self.availability_topic, "online", retain=True)
         else:
             logger.error(f"Failed to connect to MQTT broker, return code {rc}")
 
     def on_mqtt_message(self, client, userdata, msg):
+        logger.info(f"MQTT Message Received -> Topic: {msg.topic}, Payload: {msg.payload}")
         try:
             payload = msg.payload.decode()
-            logger.info(f"Received MQTT message on {msg.topic}: {payload}")
             watts = int(float(payload))
             if self.loop:
                 self.loop.call_soon_threadsafe(self.command_queue.put_nowait, watts)
             else:
                 logger.error("Event loop not initialized, cannot process command")
-        except ValueError:
-            logger.warning(f"Invalid payload received: {msg.payload}")
+        except Exception as e:
+            logger.warning(f"Error handling message: {e}")
 
     def publish_discovery(self):
         # Home Assistant MQTT Discovery for Number entity
