@@ -5,6 +5,7 @@ mqtt:
   password: ""
   topic_prefix: "hoymiles"
   device_id: "hoymiles_remote"
+  stale_timeout: 300  # Seconds without messages before forcing reconnect
 
 dtu:
   host: "192.168.1.100"

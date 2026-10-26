@@ -44,11 +44,14 @@ class HoymilesRemoteApp:
         self.mqtt_client.on_disconnect = self.on_mqtt_disconnect
         self.mqtt_client.on_publish = self.on_publish
         self.mqtt_client.reconnect_delay_set(min_delay=1, max_delay=30)
+        self.mqtt_client.suppress_exceptions = True
         
         self.dtu = DTU(self.dtu_config['host'])
         self.loop = None
         self.command_queue = asyncio.Queue()
         self._mqtt_disconnected_at = None
+        self._last_message_at = None
+        self._stale_timeout = self.mqtt_config.get('stale_timeout', 300)
 
     def on_mqtt_log(self, client, userdata, level, buf):
         if level == mqtt.LogLevel.LOG_ERR:
@@ -85,10 +88,12 @@ class HoymilesRemoteApp:
             # Online status
             client.publish(self.availability_topic, "online", retain=True)
             self._mqtt_disconnected_at = None
+            self._last_message_at = time.monotonic()
         else:
             logger.error(f"Failed to connect, rc {rc}")
 
     def on_mqtt_message(self, client, userdata, msg):
+        self._last_message_at = time.monotonic()
         try:
             payload = msg.payload.decode(errors='replace').strip()
             # Only log interesting topics to avoid spam, but log ALL hoymiles traffic
@@ -139,6 +144,33 @@ class HoymilesRemoteApp:
         self.mqtt_client.publish(discovery_topic, json.dumps(payload), retain=True)
         self.mqtt_client.publish(self.state_topic, "0", retain=True)
 
+    def _check_mqtt_thread(self):
+        """Check if the paho-mqtt network thread is alive; restart it if dead."""
+        thread = getattr(self.mqtt_client, '_thread', None)
+        if thread is not None and not thread.is_alive():
+            logger.warning("MQTT network thread found dead but _thread not cleared - cleaning up")
+            try:
+                self.mqtt_client.loop_stop()
+            except Exception:
+                pass
+            thread = None
+        if thread is None:
+            logger.warning("MQTT network thread is dead - restarting it...")
+            self.mqtt_client.loop_start()
+            logger.info("MQTT network thread restarted")
+            return True
+        return False
+
+    def _force_reconnect(self):
+        """Force-stop and restart the MQTT network thread to recover a stale connection."""
+        logger.warning("Forcing MQTT reconnect (stop + restart network thread)...")
+        try:
+            self.mqtt_client.loop_stop()
+        except Exception as e:
+            logger.error(f"Error stopping MQTT loop: {e}")
+        self.mqtt_client.loop_start()
+        logger.info("MQTT network thread restarted after forced reconnect")
+
     async def process_commands(self):
         logger.info("Command processor started and waiting for commands...")
         while True:
@@ -151,7 +183,16 @@ class HoymilesRemoteApp:
                     elapsed = time.monotonic() - self._mqtt_disconnected_at if self._mqtt_disconnected_at else 0
                     logger.warning(f"MQTT disconnected ({elapsed:.0f}s) - waiting for reconnect...")
                 else:
-                    logger.info("Heartbeat: App is alive and waiting for MQTT messages...")
+                    restarted = self._check_mqtt_thread()
+                    if restarted:
+                        continue
+                    if self._last_message_at and (time.monotonic() - self._last_message_at > self._stale_timeout):
+                        elapsed = time.monotonic() - self._last_message_at
+                        logger.warning(f"No MQTT messages received in {elapsed:.0f}s - connection may be stale")
+                        self._force_reconnect()
+                        self._last_message_at = time.monotonic()
+                    else:
+                        logger.info("Heartbeat: App is alive and waiting for MQTT messages...")
             except Exception as e:
                 logger.error(f"Error in command loop: {e}")
 
