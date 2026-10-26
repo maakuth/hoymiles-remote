@@ -13,3 +13,5 @@ dtu:
 
 battery:
   max_power: 3600  # Maximum charge/discharge power in Watts
+  rev_soc: 10      # Reserved SOC (used by HYT inverters)
+  peak_soc: 100    # Peak SOC (used by HYT inverters)

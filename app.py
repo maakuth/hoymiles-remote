@@ -128,18 +128,38 @@ class HoymilesRemoteApp:
             percentage = 0
             logger.info(f"Setting mode to SELF_USE (0W)")
 
-        result = await self.dtu.async_set_energy_storage_working_mode(
-            dtu_serial_number=int(self.dtu_config['serial']),
-            inverter_serial_number=int(self.dtu_config['inverter_serial']),
-            bms_working_mode=mode,
-            max_power=percentage
+        # Use the more direct send_command approach which matches the CLI behavior for HYT
+        from hoymiles_wifi.hoymiles import (
+            ActionConfigInverterBatteryModeResDTO,
+            RealResDTO
         )
+        from hoymiles_wifi.const import CMD_ES_USER_SET_RES_DTO
+        
+        # Prepare the nested config message
+        msg_config = ActionConfigInverterBatteryModeResDTO()
+        msg_config.lock_password = "p"
+        msg_config.lock_command = 0
+        msg_config.bms_working_mode = mode
+        msg_config.rev_soc = self.battery_config.get('rev_soc', 10)
+        msg_config.max_power = percentage
+        msg_config.peak_soc = self.battery_config.get('peak_soc', 100)
+        
+        # Prepare the outer message
+        msg = RealResDTO()
+        msg.ymd_hms = "2024-01-01 00:00:00" # Placeholder, library usually handles or ignores
+        msg.cp_dtu_sn = 0 # CLI sets this to 0 for HYT/direct
+        msg.cp_inv_sn = int(self.dtu_config['inverter_serial'])
+        msg.offset = 0
+        msg.time = 0
+        msg.action_config_inv_bat_mode.CopyFrom(msg_config)
+        
+        result = await self.dtu.async_send_command(CMD_ES_USER_SET_RES_DTO, msg)
         
         if result:
-            logger.info(f"DTU Command successful: {result}")
+            logger.info(f"Command accepted by inverter: {result}")
             self.mqtt_client.publish(self.state_topic, str(watts), retain=True)
         else:
-            logger.error("DTU Command failed (no response)")
+            logger.error("Inverter Command failed (no response)")
 
     async def run(self):
         self.loop = asyncio.get_running_loop()
