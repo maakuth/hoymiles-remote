@@ -1,0 +1,176 @@
+Get-energy-storage-data Response: 
+[serial_number: 36572250571138
+timestamp: 1780152683
+offset: 10800
+active_power: 1
+production {
+  energy_to_battery: 133
+  energy_to_grid: 124
+}
+consumption {
+  energy_from_grid: 24
+}
+pv_panels {
+  solar_irradiance: 1
+  voltage: 389
+}
+pv_panels {
+  solar_irradiance: 2
+  voltage: 383
+  current: -2
+}
+battery_management {
+  type: 1
+  state_of_charge: 100
+  state_of_health: 99
+  voltage: 4400
+  internal_discharge_mode: 300
+  cell_voltage_high: 4526
+  cell_voltage_low: 3600
+  temp_high_charge: 210
+  temp_low_charge: 180
+  temp_high_module: 210
+  temp_low_module: 180
+  energy_charged: 175
+  energy_discharged: 1
+  voltage_charge_high: 4087
+  voltage_charge_low: 4061
+  voltage_module_high: 5111
+  voltage_module_low: 1010
+}
+grid {
+  param {
+    status: 1
+    frequency: 5000
+    power_factor_deviation: -21
+  }
+  phases {
+    phase: 1
+    voltage: 2396
+    current: -280
+    active_power: 646
+    reactive_power: 257
+    power_factor: 92
+    energy_frequency: 33
+    energy_consumed: 12
+  }
+  phases {
+    phase: 2
+    voltage: 2363
+    current: 640
+    active_power: -1383
+    reactive_power: 638
+    power_factor: -90
+    energy_frequency: 65
+    energy_consumed: 34
+  }
+  phases {
+    phase: 3
+    voltage: 2393
+    current: -220
+    active_power: 494
+    reactive_power: 231
+    power_factor: 90
+    energy_frequency: 38
+    energy_consumed: 31
+  }
+}
+load {
+  param {
+    status: 1
+    frequency: 5008
+  }
+  phases {
+    phase: 1
+    voltage: 2385
+    active_power: -692
+    energy_consumed: 1
+  }
+  phases {
+    phase: 2
+    voltage: 2356
+    active_power: 1391
+    energy_consumed: 21
+  }
+  phases {
+    phase: 3
+    voltage: 2388
+    active_power: -508
+    energy_consumed: 14
+  }
+}
+inverter {
+  param {
+    status: 3
+    frequency: 5009
+    isolation_resistance: 4980
+    leakage_current: 3
+    drm_signal: 1
+  }
+  phases {
+    phase: 1
+    voltage: 2387
+    current: -86
+    active_power: -21
+    reactive_power: -8
+    dc_current: 10
+    dc_voltage: -159
+    eps_voltage: 25
+    eps_current: -45
+    eps_power: -1
+  }
+  phases {
+    phase: 2
+    voltage: 2358
+    current: 87
+    active_power: 14
+    reactive_power: -12
+    dc_current: 7
+    dc_voltage: -211
+    eps_voltage: 48
+    eps_current: -62
+    eps_power: -2
+  }
+  phases {
+    phase: 3
+    voltage: 2387
+    current: -76
+    active_power: -8
+    reactive_power: 15
+    dc_current: 11
+    dc_voltage: 69
+    eps_voltage: 27
+    eps_current: -47
+    eps_power: -1
+  }
+}
+generator {
+  param {
+  }
+  phases {
+    phase: 1
+  }
+  phases {
+    phase: 2
+  }
+  phases {
+    phase: 3
+  }
+}
+pv_inverter {
+  param {
+  }
+  phases {
+    phase: 1
+  }
+  phases {
+    phase: 2
+  }
+  phases {
+    phase: 3
+  }
+}
+power_flow {
+  grid_to_load: 249
+}
+]
