@@ -128,29 +128,29 @@ class HoymilesRemoteApp:
             percentage = 0
             logger.info(f"Setting mode to SELF_USE (0W)")
 
-        # Configure DTU with a longer timeout
-        self.dtu.timeout = 30 
+        # Configure DTU
+        self.dtu.timeout = 10 
         
         dtu_sn = None
-        # Try to get gateway info with retries
-        for attempt in range(3):
-            try:
-                logger.info(f"Fetching gateway info (attempt {attempt+1}/3)...")
-                gateway_info = await self.dtu.async_get_gateway_info()
-                if gateway_info:
-                    dtu_sn = gateway_info.serial_number
-                    logger.info(f"Dynamic gateway SN found: {dtu_sn}")
-                    break
-            except Exception as e:
-                logger.debug(f"Gateway fetch attempt {attempt+1} failed: {e}")
-            await asyncio.sleep(1)
+        # Try to get gateway info
+        try:
+            logger.info("Fetching gateway info...")
+            gateway_info = await self.dtu.async_get_gateway_info()
+            if gateway_info:
+                dtu_sn = gateway_info.serial_number
+                logger.info(f"Dynamic gateway SN found: {dtu_sn}")
+        except Exception as e:
+            logger.debug(f"Gateway fetch failed: {e}")
 
-        # Fallback to config if dynamic fetch failed
+        # Fallback to config
         if dtu_sn is None:
             dtu_sn = int(self.dtu_config.get('serial', 0))
-            logger.warning(f"Failed to fetch gateway info, falling back to config SN: {dtu_sn}")
+            logger.warning(f"Using fallback/config gateway SN: {dtu_sn}")
 
         try:
+            # Increment sequence to mirror CLI behavior
+            self.dtu.sequence = (self.dtu.sequence + 1) & 0xFFFF
+            
             result = await self.dtu.async_set_energy_storage_working_mode(
                 dtu_serial_number=dtu_sn,
                 inverter_serial_number=int(self.dtu_config['inverter_serial']),
@@ -161,7 +161,7 @@ class HoymilesRemoteApp:
             )
             
             if result:
-                logger.info(f"Inverter Command successful")
+                logger.info("Inverter Command successful")
                 self.mqtt_client.publish(self.state_topic, str(watts), retain=True)
             else:
                 logger.error("Inverter Command failed (no response)")
