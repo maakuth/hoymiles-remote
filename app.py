@@ -80,7 +80,7 @@ class HoymilesRemoteApp:
         
         payload = {
             "name": "Hoymiles Battery Power",
-            "unique_id": f"{self.device_id}_battery_power",
+            "unique_id": f"{self.device_id}_power_ctrl",
             "cmd_t": self.command_topic,
             "stat_t": self.state_topic,
             "avty_t": self.availability_topic,
@@ -90,13 +90,14 @@ class HoymilesRemoteApp:
             "step": 1,
             "device": {
                 "identifiers": [self.device_id],
-                "name": "Hoymiles Remote Control",
-                "model": "BESS Controller",
+                "name": "Hoymiles Remote",
                 "manufacturer": "Gemini CLI"
             }
         }
-        logger.info(f"Sending Discovery Payload to {discovery_topic}: {json.dumps(payload)}")
+        logger.info(f"Sending Discovery Payload to {discovery_topic}")
         self.mqtt_client.publish(discovery_topic, json.dumps(payload), retain=True)
+        # Publish initial state
+        self.mqtt_client.publish(self.state_topic, "0", retain=True)
 
     async def process_commands(self):
         logger.info("Command processor started and waiting for commands...")
