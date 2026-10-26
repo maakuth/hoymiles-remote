@@ -72,6 +72,9 @@ class HoymilesRemoteApp:
             logger.info(f"Subscribing to command topic: {self.command_topic}")
             client.subscribe(self.command_topic, qos=1)
 
+            # Clean up stale discovery topics from old versions
+            client.publish(f"homeassistant/number/{self.device_id}/battery_power/config", "", retain=True)
+
             # Publish discovery first
             self.publish_discovery()
 
@@ -116,6 +119,7 @@ class HoymilesRemoteApp:
             "payload_available": "online",
             "payload_not_available": "offline",
             "unit_of_measurement": "W",
+            "optimistic": True,
             "min": -max_p,
             "max": max_p,
             "step": 1,
@@ -145,17 +149,22 @@ class HoymilesRemoteApp:
     async def handle_power_command(self, watts):
         max_p = self.battery_config['max_power']
         percentage = min(100, max(0, int(abs(watts) / max_p * 100)))
+        soc_floor = self.battery_config.get('rev_soc', 10)
+        soc_ceil = self.battery_config.get('charge_soc', 90)
         
         if watts > 0:
             mode = BMSWorkingMode.FORCED_DISCHARGE
-            logger.info(f"Setting mode to FORCED_DISCHARGE at {percentage}% ({watts}W)")
+            rev_soc = soc_floor
+            logger.info(f"Setting mode to FORCED_DISCHARGE at {percentage}% ({watts}W), rev_soc={rev_soc}")
         elif watts < 0:
             mode = BMSWorkingMode.FORCED_CHARGING
-            logger.info(f"Setting mode to FORCED_CHARGING at {percentage}% ({abs(watts)}W)")
+            rev_soc = soc_ceil
+            logger.info(f"Setting mode to FORCED_CHARGING at {percentage}% ({abs(watts)}W), rev_soc={rev_soc}")
         else:
             mode = BMSWorkingMode.FORCED_DISCHARGE
             percentage = 0
-            logger.info(f"Setting mode to FORCED_DISCHARGE (0W)")
+            rev_soc = soc_floor
+            logger.info(f"Setting mode to FORCED_DISCHARGE (0W), rev_soc={rev_soc}")
 
         # Use host and inverter serial from config
         dtu_host = str(self.dtu_config.get('host', '')).strip()
@@ -177,15 +186,13 @@ class HoymilesRemoteApp:
         dtu = DTU(dtu_host, timeout=15)
         
         try:
-            # This library function handles the gateway info and registry fetch internally
             result = await set_mode_cli(
                 dtu,
                 bms_working_mode=mode,
                 inverter_serial_number=inv_sn,
                 interactive_mode=False,
-                rev_soc=self.battery_config.get('rev_soc', 10),
+                rev_soc=rev_soc,
                 max_power=percentage,
-                peak_soc=self.battery_config.get('peak_soc', 100)
             )
 
             if result:
