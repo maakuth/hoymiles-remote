@@ -26,6 +26,8 @@ class HoymilesRemoteApp:
         
         self.command_topic = f"{self.topic_prefix}/battery/set_power"
         self.state_topic = f"{self.topic_prefix}/battery/power_state"
+        self.mode_command_topic = f"{self.topic_prefix}/battery/set_mode"
+        self.mode_state_topic = f"{self.topic_prefix}/battery/mode_state"
         self.availability_topic = f"{self.topic_prefix}/status"
         
         logger.info(f"Initialized with command topic: {self.command_topic}")
@@ -76,8 +78,12 @@ class HoymilesRemoteApp:
     def on_mqtt_connect(self, client, userdata, flags, rc, properties=None):
         logger.info(f"MQTT connected with rc: {rc}")
         if rc == 0:
-            logger.info(f"Subscribing to command topic: {self.command_topic}")
+            logger.info(
+                f"Subscribing to command topics: {self.command_topic}, "
+                f"{self.mode_command_topic}"
+            )
             client.subscribe(self.command_topic, qos=1)
+            client.subscribe(self.mode_command_topic, qos=1)
 
             # Clean up stale discovery topics from old versions
             client.publish(f"homeassistant/number/{self.device_id}/battery_power/config", "", retain=True)
@@ -102,16 +108,31 @@ class HoymilesRemoteApp:
             else:
                 logger.debug(f"MQTT RECV: Topic=[{msg.topic}] Payload=[{payload}]")
             
-            if msg.topic != self.command_topic:
+            if msg.topic == self.command_topic:
+                logger.info(f"!!! POWER COMMAND !!! Topic: {msg.topic}, Value: {payload}")
+                try:
+                    watts = int(float(payload))
+                    if self.loop:
+                        self.loop.call_soon_threadsafe(
+                            self.command_queue.put_nowait, ("power", watts)
+                        )
+                except ValueError:
+                    logger.error(f"Non-numeric power payload: {payload}")
                 return
 
-            logger.info(f"!!! MATCH !!! Topic: {msg.topic}, Value: {payload}")
-            try:
-                watts = int(float(payload))
+            if msg.topic == self.mode_command_topic:
+                mode = payload.lower()
+                if mode not in ("self_consumption", "fixed"):
+                    logger.error(
+                        "Invalid mode payload: %s (expected self_consumption or fixed)",
+                        payload,
+                    )
+                    return
+                logger.info(f"!!! MODE COMMAND !!! Topic: {msg.topic}, Value: {mode}")
                 if self.loop:
-                    self.loop.call_soon_threadsafe(self.command_queue.put_nowait, watts)
-            except ValueError:
-                logger.error(f"Non-numeric payload: {payload}")
+                    self.loop.call_soon_threadsafe(
+                        self.command_queue.put_nowait, ("mode", mode)
+                    )
         except Exception as e:
             logger.error(f"Msg handler error: {e}")
 
@@ -142,7 +163,24 @@ class HoymilesRemoteApp:
         }
         logger.info(f"Publishing Discovery v5 to {discovery_topic}")
         self.mqtt_client.publish(discovery_topic, json.dumps(payload), retain=True)
+
+        mode_discovery_topic = f"homeassistant/select/{self.device_id}_mode/config"
+        mode_payload = {
+            "name": "Hoymiles Battery Mode",
+            "unique_id": f"{self.device_id}_mode_v1",
+            "command_topic": self.mode_command_topic,
+            "state_topic": self.mode_state_topic,
+            "availability_topic": self.availability_topic,
+            "payload_available": "online",
+            "payload_not_available": "offline",
+            "options": ["self_consumption", "fixed"],
+            "device": payload["device"],
+        }
+        self.mqtt_client.publish(mode_discovery_topic, json.dumps(mode_payload), retain=True)
         self.mqtt_client.publish(self.state_topic, "0", retain=True)
+        # Match the pre-mode-control behavior: the bridge starts in manual
+        # signed-power control unless self-consumption is explicitly selected.
+        self.mqtt_client.publish(self.mode_state_topic, "fixed", retain=True)
 
     def _check_mqtt_thread(self):
         """Check if the paho-mqtt network thread is alive; restart it if dead."""
@@ -175,8 +213,13 @@ class HoymilesRemoteApp:
         logger.info("Command processor started and waiting for commands...")
         while True:
             try:
-                watts = await asyncio.wait_for(self.command_queue.get(), timeout=30.0)
-                await self.handle_power_command(watts)
+                command_type, value = await asyncio.wait_for(
+                    self.command_queue.get(), timeout=30.0
+                )
+                if command_type == "power":
+                    await self.handle_power_command(value)
+                else:
+                    await self.handle_mode_command(value)
                 self.command_queue.task_done()
             except asyncio.TimeoutError:
                 if not self.mqtt_client.is_connected():
@@ -249,6 +292,7 @@ class HoymilesRemoteApp:
             if result:
                 logger.info("Inverter Command successful (via CLI logic)")
                 self.mqtt_client.publish(self.state_topic, str(watts), retain=True)
+                self.mqtt_client.publish(self.mode_state_topic, "fixed", retain=True)
             else:
                 logger.error("Inverter Command failed (CLI logic returned None)")
                 # Publish 0 so HA state does not get stuck at the commanded value
@@ -256,6 +300,53 @@ class HoymilesRemoteApp:
         except Exception as e:
             logger.error(f"Exception during inverter command: {e}")
             self.mqtt_client.publish(self.state_topic, "0", retain=True)
+
+    async def handle_mode_command(self, mode):
+        """Apply a named operating mode received from MQTT."""
+        if mode == "fixed":
+            # There is no separate Hoymiles "fixed" BMS mode.  A zero-power
+            # forced-discharge command leaves the inverter ready for manual
+            # signed-watt commands while taking it out of self-consumption.
+            await self.handle_power_command(0)
+            return
+
+        if mode != "self_consumption":
+            logger.error("Unsupported mode command: %s", mode)
+            return
+
+        dtu_host = str(self.dtu_config.get('host', '')).strip()
+        inv_sn = int(self.dtu_config.get('inverter_serial', 0))
+        if not dtu_host or not inv_sn:
+            logger.error("DTU host or Inverter serial missing in config!")
+            return
+
+        try:
+            from hoymiles_wifi.__main__ import async_set_energy_storage_working_mode as set_mode_cli
+        except ImportError:
+            logger.error("Could not import async_set_energy_storage_working_mode from hoymiles_wifi.__main__")
+            return
+
+        rev_soc = self.battery_config.get('rev_soc', 10)
+        dtu = DTU(dtu_host, timeout=15)
+        logger.info("Setting mode to SELF_USE (self_consumption), rev_soc=%s", rev_soc)
+        try:
+            result = await set_mode_cli(
+                dtu,
+                bms_working_mode=BMSWorkingMode.SELF_USE,
+                inverter_serial_number=inv_sn,
+                interactive_mode=False,
+                rev_soc=rev_soc,
+            )
+            if result:
+                logger.info("Inverter set to self-consumption mode")
+                self.mqtt_client.publish(self.state_topic, "0", retain=True)
+                self.mqtt_client.publish(
+                    self.mode_state_topic, "self_consumption", retain=True
+                )
+            else:
+                logger.error("Inverter mode command failed (CLI logic returned None)")
+        except Exception as e:
+            logger.error(f"Exception during inverter mode command: {e}")
 
     async def run(self):
         self.loop = asyncio.get_running_loop()

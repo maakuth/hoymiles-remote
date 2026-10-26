@@ -6,7 +6,9 @@ A Python bridge to control Hoymiles Hybrid Inverters (BESS) via MQTT, designed f
 - **Signed Power Control**: Send a single signed integer to control battery power.
   - **Positive**: Force Discharge (power from battery to grid/home).
   - **Negative**: Force Charge (power from grid to battery).
-  - **Zero**: Return to "Self-Consumption" (automatic) mode.
+  - **Zero**: Set fixed/manual control to 0 W.
+- **Operating Mode**: Select `self_consumption` for the inverter's native
+  Self Consumption mode, or `fixed` to enable manual signed-power control.
 - **Home Assistant Discovery**: Automatically creates a `number` entity in Home Assistant via MQTT Discovery.
 - **Local Control**: Uses the `hoymiles-wifi` library to communicate directly with the DTU over the local network.
 
@@ -32,6 +34,22 @@ Run the application:
 ```bash
 python3 app.py
 ```
+
+## MQTT controls
+
+With the default topic prefix, publish one of the following:
+
+| Topic | Payload | Result |
+|---|---|---|
+| `hoymiles/battery/set_mode` | `self_consumption` | Sets native Hoymiles Self Consumption mode (`SELF_USE = 1`). |
+| `hoymiles/battery/set_mode` | `fixed` | Enables fixed/manual control at 0 W; then set a power value. |
+| `hoymiles/battery/set_power` | signed watts | A positive value discharges and a negative value charges. |
+
+The bridge publishes the last successful requested mode to
+`hoymiles/battery/mode_state` and the requested power to
+`hoymiles/battery/power_state`. These are command states, not live inverter
+readbacks. On startup, the mode defaults to `fixed` for backward compatibility
+with the existing signed-power-only interface.
 
 ## Configuration
 

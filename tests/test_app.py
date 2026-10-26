@@ -68,6 +68,51 @@ battery:
                 rev_soc=10,
             )
 
+    async def test_handle_self_consumption_mode(self):
+        with patch("hoymiles_wifi.__main__.async_set_energy_storage_working_mode", new_callable=AsyncMock) as mock_set_mode:
+            mock_set_mode.return_value = True
+            await self.app.handle_mode_command("self_consumption")
+            mock_set_mode.assert_called_with(
+                unittest.mock.ANY,
+                inverter_serial_number=456,
+                bms_working_mode=BMSWorkingMode.SELF_USE,
+                interactive_mode=False,
+                rev_soc=10,
+            )
+            self.app.mqtt_client.publish.assert_any_call(
+                self.app.mode_state_topic, "self_consumption", retain=True
+            )
+
+    async def test_handle_fixed_mode_sets_zero_power(self):
+        with patch("hoymiles_wifi.__main__.async_set_energy_storage_working_mode", new_callable=AsyncMock) as mock_set_mode:
+            mock_set_mode.return_value = True
+            await self.app.handle_mode_command("fixed")
+            mock_set_mode.assert_called_with(
+                unittest.mock.ANY,
+                inverter_serial_number=456,
+                bms_working_mode=BMSWorkingMode.FORCED_DISCHARGE,
+                max_power=0,
+                interactive_mode=False,
+                rev_soc=10,
+            )
+            self.app.mqtt_client.publish.assert_any_call(
+                self.app.mode_state_topic, "fixed", retain=True
+            )
+
+    def test_discovery_publishes_mode_select(self):
+        self.app.publish_discovery()
+        discovery_topic = "homeassistant/select/hoymiles_remote_mode/config"
+        published = [call.args for call in self.app.mqtt_client.publish.call_args_list]
+        topic, payload = next(args for args in published if args[0] == discovery_topic)
+        config = __import__("json").loads(payload)
+        self.assertEqual(topic, discovery_topic)
+        self.assertEqual(config["command_topic"], self.app.mode_command_topic)
+        self.assertEqual(config["state_topic"], self.app.mode_state_topic)
+        self.assertEqual(config["options"], ["self_consumption", "fixed"])
+        self.app.mqtt_client.publish.assert_any_call(
+            self.app.mode_state_topic, "fixed", retain=True
+        )
+
     async def test_handle_power_command_charge_default_soc(self):
         config_no_soc = """
 mqtt:
