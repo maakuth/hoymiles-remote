@@ -1,6 +1,7 @@
 # Hoymiles BESS Remote Control
 
 A Python bridge to control Hoymiles Hybrid Inverters (BESS) via MQTT, designed for easy integration with Home Assistant.
+This has been developed with AI tools such as Gemini CLI and OpenCode. The documentation seems sloppy at times, but it is tested with a real inverter and it is in continuous production use.
 
 ## Features
 - **Signed Power Control**: Send a single signed integer to control battery power.
